@@ -1,0 +1,56 @@
+name: CI
+
+  on:
+    push:
+      branches: [main]
+    pull_request:
+      branches: [main]
+
+  jobs:
+    test:
+      runs-on: ubuntu-latest
+      steps:
+        - uses: actions/checkout@v4
+
+        - uses: actions/setup-java@v4
+          with:
+            java-version: '17'
+            distribution: 'temurin'
+            cache: maven
+
+        - name: Run tests
+          run: mvn test -q
+
+    build-scan-push:
+      needs: test
+      runs-on: ubuntu-latest
+      steps:
+        - uses: actions/checkout@v4
+
+        - name: Login to Docker Hub
+          uses: docker/login-action@v3
+          with:
+            username: ${{ secrets.DOCKERHUB_USERNAME }}
+            password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+        - name: Build image
+          uses: docker/build-push-action@v6
+          with:
+            context: .
+            load: true
+            tags: ${{ secrets.DOCKERHUB_USERNAME }}/taskapi:${{ github.sha }}
+
+        - name: Trivy security scan
+          uses: aquasecurity/trivy-action@master
+          with:
+            image-ref: ${{ secrets.DOCKERHUB_USERNAME }}/taskapi:${{ github.sha }}
+            format: table
+            exit-code: '1'
+            severity: CRITICAL
+
+        - name: Push to Docker Hub
+          run: |
+            docker push ${{ secrets.DOCKERHUB_USERNAME }}/taskapi:${{ github.sha }}
+            docker tag ${{ secrets.DOCKERHUB_USERNAME }}/taskapi:${{ github.sha }} \
+              ${{ secrets.DOCKERHUB_USERNAME }}/taskapi:latest
+            docker push ${{ secrets.DOCKERHUB_USERNAME }}/taskapi:latest
